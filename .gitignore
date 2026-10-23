@@ -1,0 +1,58 @@
+# ============ Переменные окружения (СЕКРЕТЫ!) ============
+.env
+.env.local
+.env.*.local
+backend/.env
+frontend/.env
+
+# ============ Go ============
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+*.test
+*.out
+vendor/
+go.work
+go.work.sum
+
+# ============ Node.js / React ============
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+dist/
+build/
+.vite/
+
+# ============ IDE ============
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+Thumbs.db
+
+# ============ Docker ============
+docker-compose.override.yml
+
+# ============ Базы данных (локальные) ============
+*.sql.bak
+*.dump
+
+# ============ Логи ============
+*.log
+logs/
+
+# ============ OS ============
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# ============ Временные файлы ============
+tmp/
+temp/
+*.tmp
