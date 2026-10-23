@@ -1,115 +1,71 @@
-package database
+﻿package database
 
 import (
-	"database/sql"
-	"fmt"
-	"log"
-	"os"
-
-	_ "github.com/go-sql-driver/mysql"
-	"golang.org/x/crypto/bcrypt"
+    "database/sql"
+    "fmt"
+    "log"
+    "os"
+    "DGTYHAC26/internal/config"
+    _ "github.com/go-sql-driver/mysql"
+    "golang.org/x/crypto/bcrypt"
 )
 
-// Migrate выполняет все миграции
-func Migrate(db *sql.DB) error {
-	log.Println("Running database migrations...")
-
-	// Читаем SQL файлы
-	migrations := []string{
-		"migrations/001_init.sql",
-	}
-
-	for _, migrationFile := range migrations {
-		sqlBytes, err := os.ReadFile(migrationFile)
-		if err != nil {
-			return fmt.Errorf("failed to read migration file %s: %w", migrationFile, err)
-		}
-
-		_, err = db.Exec(string(sqlBytes))
-		if err != nil {
-			return fmt.Errorf("failed to execute migration %s: %w", migrationFile, err)
-		}
-
-		log.Printf("Migration %s completed successfully", migrationFile)
-	}
-
-	return nil
-}
-
-// SeedAdmin создает администратора из .env если его нет
-func SeedAdmin(db *sql.DB) error {
-	adminUsername := os.Getenv("ADMIN_USERNAME")
-	adminPassword := os.Getenv("ADMIN_PASSWORD")
-
-	if adminUsername == "" || adminPassword == "" {
-		log.Println("Admin credentials not set in .env, skipping admin creation")
-		return nil
-	}
-
-	// Проверяем, существует ли уже админ
-	var count int
-	err := db.QueryRow("SELECT COUNT(*) FROM users WHERE username = ?", adminUsername).Scan(&count)
-	if err != nil {
-		return fmt.Errorf("failed to check admin existence: %w", err)
-	}
-
-	if count > 0 {
-		log.Printf("Admin user '%s' already exists", adminUsername)
-		return nil
-	}
-
-	// Хешируем пароль
-	hashedPassword, err := bcrypt.GenerateFromPassword([]byte(adminPassword), bcrypt.DefaultCost)
-	if err != nil {
-		return fmt.Errorf("failed to hash password: %w", err)
-	}
-
-	// Создаем админа
-	_, err = db.Exec(
-		"INSERT INTO users (username, password_hash, role) VALUES (?, ?, ?)",
-		adminUsername,
-		string(hashedPassword),
-		"admin",
-	)
-	if err != nil {
-		return fmt.Errorf("failed to create admin: %w", err)
-	}
-
-	log.Printf("Admin user '%s' created successfully", adminUsername)
-	return nil
-}
-
-// InitializeDB инициализирует БД, выполняет миграции и создает админа
 func InitializeDB() (*sql.DB, error) {
-	dsn := fmt.Sprintf(
-		"%s:%s@tcp(%s:%s)/%s?parseTime=true&charset=utf8mb4",
-		os.Getenv("DB_USER"),
-		os.Getenv("DB_PASSWORD"),
-		os.Getenv("DB_HOST"),
-		os.Getenv("DB_PORT"),
-		os.Getenv("DB_NAME"),
-	)
+    cfg := config.AppConfig
+    db, err := sql.Open("mysql", cfg.DSN())
+    if err != nil {
+        return nil, fmt.Errorf("failed to connect: %w", err)
+    }
+    
+    if err := db.Ping(); err != nil {
+        return nil, fmt.Errorf("failed to ping: %w", err)
+    }
+    
+    log.Println("Database connected")
+    
+    if err := runMigrations(db); err != nil {
+        return nil, err
+    }
+    
+    if err := seedAdmin(db); err != nil {
+        return nil, err
+    }
+    
+    return db, nil
+}
 
-	db, err := sql.Open("mysql", dsn)
-	if err != nil {
-		return nil, fmt.Errorf("failed to connect to database: %w", err)
-	}
+func runMigrations(db *sql.DB) error {
+    log.Println("Running migrations...")
+    sqlBytes, err := os.ReadFile("migrations/001_init.sql")
+    if err != nil {
+        return err
+    }
+    _, err = db.Exec(string(sqlBytes))
+    if err != nil {
+        return err
+    }
+    log.Println("Migrations completed")
+    return nil
+}
 
-	// Проверяем соединение
-	if err := db.Ping(); err != nil {
-		return nil, fmt.Errorf("failed to ping database: %w", err)
-	}
-
-	// Выполняем миграции
-	if err := Migrate(db); err != nil {
-		return nil, fmt.Errorf("migration failed: %w", err)
-	}
-
-	// Создаем админа
-	if err := SeedAdmin(db); err != nil {
-		return nil, fmt.Errorf("admin seed failed: %w", err)
-	}
-
-	log.Println("Database initialized successfully")
-	return db, nil
+func seedAdmin(db *sql.DB) error {
+    cfg := config.AppConfig
+    if cfg.AdminUsername == "" || cfg.AdminPassword == "" {
+        return nil
+    }
+    
+    var count int
+    db.QueryRow("SELECT COUNT(*) FROM users WHERE username = ?", cfg.AdminUsername).Scan(&count)
+    if count > 0 {
+        return nil
+    }
+    
+    hash, _ := bcrypt.GenerateFromPassword([]byte(cfg.AdminPassword), bcrypt.DefaultCost)
+    _, err := db.Exec("INSERT INTO users (username, password_hash, role) VALUES (?, ?, ?)",
+        cfg.AdminUsername, string(hash), "admin")
+    if err != nil {
+        return err
+    }
+    log.Println("Admin created")
+    return nil
 }
