@@ -1,4 +1,4 @@
-﻿package config
+package config
 
 import (
     "fmt"
@@ -60,7 +60,7 @@ func Load() error {
 }
 
 func (c *Config) DSN() string {
-    return fmt.Sprintf("%s:%s@tcp(%s:%s)/%s?parseTime=true&charset=utf8mb4",
+    return fmt.Sprintf("%s:%s@tcp(%s:%s)/%s?parseTime=true&charset=utf8mb4&multiStatements=true",
         c.DBUser, c.DBPassword, c.DBHost, c.DBPort, c.DBName)
 }
 
