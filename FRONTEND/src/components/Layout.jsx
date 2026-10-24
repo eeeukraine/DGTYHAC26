@@ -24,7 +24,7 @@ const navItems = [
   { to: '/payments', label: 'Платежи', icon: <PaymentsIcon /> },
   { to: '/users', label: 'Пользователи', icon: <PeopleIcon />, adminOnly: true },
   { to: '/family', label: 'Семья', icon: <GroupIcon /> },
-  { to: '/docs', label: 'API Docs', icon: <DescriptionIcon /> },
+  { to: '/docs', label: 'API Docs', icon: <DescriptionIcon />, adminOnly: true },
 ]
 
 export function Layout({ children }) {

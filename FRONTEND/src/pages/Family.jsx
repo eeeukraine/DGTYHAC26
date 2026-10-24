@@ -11,13 +11,15 @@ import {
   Warning as WarningIcon, CheckCircle as CheckCircleIcon, GroupRemove as GroupRemoveIcon
 } from '@mui/icons-material';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import { useAuthStore } from '../store/authStore'; // <-- ИСПРАВЛЕНО: Добавлен импорт стора
 import apiClient from '../api/client';
 
 export function Family() {
+  const { user } = useAuthStore(); // <-- ИСПРАВЛЕНО: Получаем данные текущего пользователя
+  
   const [dialogOpen, setDialogOpen] = useState(false);
   const [joinDialogOpen, setJoinDialogOpen] = useState(false);
   const [distributeDialogOpen, setDistributeDialogOpen] = useState(false);
-
   
   const [newFamilyName, setNewFamilyName] = useState('');
   const [joinCode, setJoinCode] = useState('');
@@ -71,8 +73,6 @@ export function Family() {
       showSuccess('Семья распущена');
     },
   });
-
-
 
   // Мутация распределения платежа
   const distributeMutation = useMutation({
@@ -176,8 +176,10 @@ export function Family() {
 
       {/* Список семей */}
       {families && families.length > 0 ? families.map((family) => {
-        // TODO: В будущем сравнивать с реальным userID из JWT токена. Пока хардкод 1 (admin)
-        const isOwner = family.owner_id === 1; 
+        // <-- ИСПРАВЛЕНО: Динамическая проверка роли текущего пользователя в ЭТОЙ семье
+        const currentUserMember = family.members?.find(m => m.username === user?.username);
+        const isOwner = currentUserMember?.role === 'owner';
+        const isAdminOrOwner = isOwner || currentUserMember?.role === 'admin';
         
         return (
           <Card key={family.id} sx={{ mb: 3 }}>
@@ -189,6 +191,8 @@ export function Family() {
                 </Box>
                 <Box sx={{ display: 'flex', gap: 1, alignItems: 'center' }}>
                   <Chip label={`${family.members?.length || 0}/${family.max_members} уч.`} color="primary" />
+                  
+                  {/* <-- ИСПРАВЛЕНО: Распустить может ТОЛЬКО владелец (owner) */}
                   {isOwner && (
                     <Button 
                       variant="outlined" 
@@ -208,7 +212,7 @@ export function Family() {
               </Box>
               <Divider sx={{ my: 2 }} />
 
-              {/* Код приглашения */}
+              {/* Код приглашения (виден всем участникам) */}
               <Paper sx={{ p: 2, mb: 3, bgcolor: 'background.default', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
                 <Box>
                   <Typography variant="body2" color="text.secondary">Код приглашения для участников:</Typography>
@@ -234,6 +238,17 @@ export function Family() {
                           secondary={`Присоединился: ${new Date(member.joined_at).toLocaleDateString('ru-RU')}`} 
                         />
                         <Chip label={getRoleLabel(member.role)} color={member.role === 'owner' ? 'primary' : 'default'} size="small" />
+                        
+                        {/* <-- ИСПРАВЛЕНО: Удалить участника может только владелец (и не самого себя) */}
+                        {isOwner && member.role !== 'owner' && (
+                          <IconButton size="small" color="error" onClick={() => {
+                             if(window.confirm(`Удалить ${member.username} из семьи?`)) {
+                               // Здесь можно добавить мутацию apiClient.removeMember(family.id, member.id)
+                             }
+                          }}>
+                            <DeleteIcon />
+                          </IconButton>
+                        )}
                       </ListItem>
                     ))}
                   </List>
@@ -241,7 +256,7 @@ export function Family() {
 
                 {/* Общие платежи */}
                 <Grid item xs={12} md={6}>
-<Typography variant="subtitle1" sx={{ fontWeight: 'bold', mb: 1 }}>Общие платежи семьи:</Typography>
+                  <Typography variant="subtitle1" sx={{ fontWeight: 'bold', mb: 1 }}>Общие платежи семьи:</Typography>
                   
                   {family.shared_payments?.length > 0 ? (
                     <List dense>
@@ -259,7 +274,9 @@ export function Family() {
                               size="small" 
                             />
                           </Box>
-                          {payment.status === 'pending' && isOwner && (
+                          
+                          {/* <-- ИСПРАВЛЕНО: Распределять платежи может владелец или админ семьи */}
+                          {payment.status === 'pending' && isAdminOrOwner && (
                             <ListItemSecondaryAction>
                               <Button 
                                 variant="contained" 
@@ -339,9 +356,6 @@ export function Family() {
           </Button>
         </DialogActions>
       </Dialog>
-
-      {/* 3. Диалог создания общего платежа */}
-
 
       {/* 4. Диалог распределения платежа */}
       <Dialog open={distributeDialogOpen} onClose={() => setDistributeDialogOpen(false)} maxWidth="sm" fullWidth>
