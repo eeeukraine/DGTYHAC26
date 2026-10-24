@@ -1,4 +1,4 @@
-﻿package handlers
+package handlers
 
 import (
 "database/sql"
@@ -6,6 +6,7 @@ import (
 "net/http"
 "strconv"
 "time"
+"DGTYHAC26/internal/middleware"
 "DGTYHAC26/internal/models"
 )
 
@@ -18,10 +19,14 @@ return &PaymentHandler{DB: db}
 }
 
 func (h *PaymentHandler) GetPayments(w http.ResponseWriter, r *http.Request) {
+userID := middleware.GetUserID(r)
+
 rows, err := h.DB.Query(`
 SELECT id, name, amount, currency, start_date, frequency_days, next_payment_date, is_active 
-FROM recurring_payments ORDER BY created_at DESC
-`)
+FROM recurring_payments 
+WHERE user_id = ? 
+ORDER BY created_at DESC
+`, userID)
 if err != nil {
 http.Error(w, `{"error":"db error"}`, http.StatusInternalServerError)
 return
@@ -38,28 +43,44 @@ payments = append(payments, p)
 }
 
 w.Header().Set("Content-Type", "application/json")
-if payments == nil {
-payments = []models.PaymentResponse{}
-}
+if payments == nil { payments = []models.PaymentResponse{} }
 json.NewEncoder(w).Encode(payments)
 }
 
 func (h *PaymentHandler) CreatePayment(w http.ResponseWriter, r *http.Request) {
-var req models.CreatePaymentRequest
+var req struct {
+Name           string  `json:"name"`
+Amount         float64 `json:"amount"`
+Currency       string  `json:"currency"`
+StartDate      string  `json:"start_date"`
+FrequencyDays  int     `json:"frequency_days"`
+PaymentType    string  `json:"payment_type"`
+TargetUsername string  `json:"target_username"`
+FamilyCode     string  `json:"family_code"`
+}
 if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 http.Error(w, `{"error":"invalid json"}`, http.StatusBadRequest)
 return
 }
 
 startDate, _ := time.Parse("2006-01-02", req.StartDate)
-if startDate.IsZero() {
-startDate = time.Now()
+if startDate.IsZero() { startDate = time.Now() }
+
+userID := middleware.GetUserID(r)
+
+// Платёж для семьи
+if req.PaymentType == "family" {
+var familyID int64
+err := h.DB.QueryRow("SELECT id FROM families WHERE invite_code = ?", req.FamilyCode).Scan(&familyID)
+if err == sql.ErrNoRows {
+http.Error(w, `{"error":"Семья с таким кодом не найдена"}`, http.StatusNotFound)
+return
 }
 
 res, err := h.DB.Exec(`
-INSERT INTO recurring_payments (user_id, name, amount, currency, start_date, frequency_days, next_payment_date, is_active)
-VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-`, 1, req.Name, req.Amount, req.Currency, startDate, req.FrequencyDays, startDate, true)
+INSERT INTO shared_payments (family_id, name, total_amount, currency, due_date, status, created_by)
+VALUES (?, ?, ?, ?, ?, 'pending', ?)
+`, familyID, req.Name, req.Amount, req.Currency, startDate, userID)
 
 if err != nil {
 http.Error(w, `{"error":"db insert error"}`, http.StatusInternalServerError)
@@ -69,7 +90,35 @@ return
 id, _ := res.LastInsertId()
 w.Header().Set("Content-Type", "application/json")
 w.WriteHeader(http.StatusCreated)
-json.NewEncoder(w).Encode(map[string]int64{"id": id})
+json.NewEncoder(w).Encode(map[string]interface{}{"id": id, "type": "shared"})
+return
+}
+
+// Платёж для другого пользователя
+targetUserID := userID
+if req.PaymentType == "user" && req.TargetUsername != "" {
+err := h.DB.QueryRow("SELECT id FROM users WHERE username = ?", req.TargetUsername).Scan(&targetUserID)
+if err == sql.ErrNoRows {
+http.Error(w, `{"error":"Пользователь не найден"}`, http.StatusNotFound)
+return
+}
+}
+
+// Личный платёж
+res, err := h.DB.Exec(`
+INSERT INTO recurring_payments (user_id, name, amount, currency, start_date, frequency_days, next_payment_date, is_active)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+`, targetUserID, req.Name, req.Amount, req.Currency, startDate, req.FrequencyDays, startDate, true)
+
+if err != nil {
+http.Error(w, `{"error":"db insert error"}`, http.StatusInternalServerError)
+return
+}
+
+id, _ := res.LastInsertId()
+w.Header().Set("Content-Type", "application/json")
+w.WriteHeader(http.StatusCreated)
+json.NewEncoder(w).Encode(map[string]interface{}{"id": id, "type": "recurring"})
 }
 
 func (h *PaymentHandler) UpdatePayment(w http.ResponseWriter, r *http.Request) {
@@ -79,10 +128,7 @@ id, _ := strconv.ParseInt(idStr, 10, 64)
 var req models.UpdatePaymentRequest
 json.NewDecoder(r.Body).Decode(&req)
 
-_, err := h.DB.Exec(`
-UPDATE recurring_payments SET name=?, amount=?, is_active=? WHERE id=?
-`, req.Name, req.Amount, req.IsActive, id)
-
+_, err := h.DB.Exec(`UPDATE recurring_payments SET name=?, amount=?, is_active=? WHERE id=?`, req.Name, req.Amount, req.IsActive, id)
 if err != nil {
 http.Error(w, `{"error":"db update error"}`, http.StatusInternalServerError)
 return

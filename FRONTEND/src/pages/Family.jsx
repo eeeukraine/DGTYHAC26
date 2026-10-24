@@ -1,99 +1,133 @@
-import { useState } from 'react';
+import { useState, useMemo } from 'react';
 import {
   Box, Typography, Card, CardContent, Button, Dialog,
   DialogTitle, DialogContent, DialogActions, TextField,
   List, ListItem, ListItemText, ListItemSecondaryAction,
-  IconButton, Chip, Avatar, Alert, Divider, Grid, Paper,
+  IconButton, Chip, Avatar, Alert, Divider, Grid, Paper, InputAdornment
 } from '@mui/material';
 import {
-  Add as AddIcon,
-  Delete as DeleteIcon,
-  ContentCopy as CopyIcon,
-  Group as GroupIcon,
-  PersonAdd as PersonAddIcon,
-  Check as CheckIcon,
-  Close as CloseIcon,
+  Add as AddIcon, Delete as DeleteIcon, ContentCopy as CopyIcon,
+  Group as GroupIcon, PersonAdd as PersonAddIcon, AccountBalanceWallet as WalletIcon,
+  Warning as WarningIcon, CheckCircle as CheckCircleIcon, GroupRemove as GroupRemoveIcon
 } from '@mui/icons-material';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import apiClient from '../api/client';
 
 export function Family() {
   const [dialogOpen, setDialogOpen] = useState(false);
-  const [inviteDialog, setInviteDialog] = useState(false);
+  const [joinDialogOpen, setJoinDialogOpen] = useState(false);
+  const [distributeDialogOpen, setDistributeDialogOpen] = useState(false);
+
+  
   const [newFamilyName, setNewFamilyName] = useState('');
-  const [inviteUsername, setInviteUsername] = useState('');
-  const [selectedFamily, setSelectedFamily] = useState(null);
+  const [joinCode, setJoinCode] = useState('');
+
+  const [selectedPayment, setSelectedPayment] = useState(null);
+  const [distributions, setDistributions] = useState({});
+
+  const [successMessage, setSuccessMessage] = useState('');
+  
   const queryClient = useQueryClient();
 
-  const { data: families, isLoading } = useQuery({
+  // Загрузка данных о семьях
+  const { data: families, isLoading, error } = useQuery({
     queryKey: ['families'],
-    queryFn: () => apiClient.getFamilies(),
+    queryFn: async () => { 
+      const res = await apiClient.getFamilies(); 
+      return res.data; 
+    },
   });
 
-  const { data: invitations } = useQuery({
-    queryKey: ['invitations'],
-    queryFn: () => apiClient.getInvitations(),
-  });
-
+  // Мутация создания семьи
   const createMutation = useMutation({
     mutationFn: (data) => apiClient.createFamily(data),
     onSuccess: () => {
-      queryClient.invalidateQueries(['families']);
-      setNewFamilyName('');
+      queryClient.invalidateQueries({ queryKey: ['families'] });
+      setNewFamilyName(''); 
       setDialogOpen(false);
+      showSuccess('Семья успешно создана!');
     },
   });
 
-  const inviteMutation = useMutation({
-    mutationFn: ({ familyId, username }) => apiClient.inviteMember(familyId, username),
+  // Мутация вступления в семью
+  const joinMutation = useMutation({
+    mutationFn: (data) => apiClient.joinFamily(data),
     onSuccess: () => {
-      setInviteUsername('');
-      setInviteDialog(false);
-      alert('Приглашение отправлено!');
+      queryClient.invalidateQueries({ queryKey: ['families'] });
+      setJoinCode(''); 
+      setJoinDialogOpen(false);
+      showSuccess('Вы успешно вступили в семью!');
     },
+    onError: (err) => {
+      showSuccess('Ошибка: ' + (err.response?.data?.error || 'Неверный код'));
+    }
   });
 
-  const removeMutation = useMutation({
-    mutationFn: ({ familyId, userId }) => apiClient.removeMember(familyId, userId),
+  // Мутация роспуска семьи
+  const disbandMutation = useMutation({
+    mutationFn: (id) => apiClient.disbandFamily(id),
     onSuccess: () => {
-      queryClient.invalidateQueries(['families']);
+      queryClient.invalidateQueries({ queryKey: ['families'] });
+      showSuccess('Семья распущена');
     },
   });
 
-  const handleCreateFamily = () => {
-    createMutation.mutate({ name: newFamilyName, max_members: 5 });
+
+
+  // Мутация распределения платежа
+  const distributeMutation = useMutation({
+    mutationFn: ({ paymentId, data }) => apiClient.distributePayment(paymentId, data),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['families'] });
+      setDistributeDialogOpen(false); 
+      setSelectedPayment(null); 
+      setDistributions({});
+      showSuccess('Платеж успешно распределен!');
+    },
+  });
+
+  const showSuccess = (msg) => { 
+    setSuccessMessage(msg); 
+    setTimeout(() => setSuccessMessage(''), 4000); 
   };
 
-  const handleInvite = () => {
-    if (selectedFamily && inviteUsername) {
-      inviteMutation.mutate({ familyId: selectedFamily.id, username: inviteUsername });
-    }
+  const handleOpenDistribute = (payment, members) => {
+    setSelectedPayment({ ...payment, members });
+    const initialDist = {};
+    members.forEach(m => { initialDist[m.id] = 0; });
+    setDistributions(initialDist);
+    setDistributeDialogOpen(true);
   };
 
-  const handleRemoveMember = (familyId, userId) => {
-    if (window.confirm('Удалить участника из семьи?')) {
-      removeMutation.mutate({ familyId, userId });
-    }
+  const handleDistributionChange = (userId, value) => {
+    setDistributions(prev => ({ ...prev, [userId]: parseFloat(value) || 0 }));
+  };
+
+  const totalDistributed = useMemo(() => 
+    Object.values(distributions).reduce((sum, val) => sum + val, 0), 
+  [distributions]);
+  
+  const isDistributionValid = Math.abs(totalDistributed - (selectedPayment?.amount || 0)) < 0.01;
+
+  const handleDistributeSubmit = () => {
+    if (!isDistributionValid || !selectedPayment) return;
+    distributeMutation.mutate({ 
+      paymentId: selectedPayment.id, 
+      data: { distributions: Object.entries(distributions).map(([userId, amount]) => ({ user_id: parseInt(userId), amount })) }
+    });
   };
 
   const copyInviteCode = (code) => {
     navigator.clipboard.writeText(code);
-    alert('Код приглашения скопирован!');
+    showSuccess('Код скопирован!');
   };
 
-  const getRoleLabel = (role) => {
-    const labels = { owner: 'Владелец', admin: 'Администратор', member: 'Участник' };
-    return labels[role] || role;
-  };
+  const getRoleLabel = (role) => ({ owner: 'Владелец', admin: 'Администратор', member: 'Участник' }[role] || role);
 
-  const getRoleColor = (role) => {
-    const colors = { owner: 'primary', admin: 'secondary', member: 'default' };
-    return colors[role] || 'default';
-  };
+  if (isLoading) return <Box sx={{ p: 3 }}><Typography>Загрузка данных семьи...</Typography></Box>;
+  if (error) return <Box sx={{ p: 3 }}><Alert severity="error">Ошибка загрузки данных</Alert></Box>;
 
-  if (isLoading) {
-    return <Typography>Загрузка...</Typography>;
-  }
+  const myDistributions = families?.flatMap(f => f.my_distributions || []) || [];
 
   return (
     <Box sx={{ p: 3 }}>
@@ -101,215 +135,264 @@ export function Family() {
         <Typography variant="h4" sx={{ fontWeight: 'bold', display: 'flex', alignItems: 'center', gap: 1 }}>
           <GroupIcon /> Семейная подписка
         </Typography>
-        <Button
-          variant="contained"
-          startIcon={<AddIcon />}
-          onClick={() => setDialogOpen(true)}
-        >
-          Создать семью
-        </Button>
+        <Box sx={{ display: 'flex', gap: 2 }}>
+          <Button variant="outlined" startIcon={<PersonAddIcon />} onClick={() => setJoinDialogOpen(true)}>
+            Вступить в семью
+          </Button>
+          <Button variant="contained" startIcon={<AddIcon />} onClick={() => setDialogOpen(true)}>
+            Создать семью
+          </Button>
+        </Box>
       </Box>
 
-      <Alert severity="info" sx={{ mb: 3 }}>
-        <b>Семейная подписка</b> позволяет до <b>5 участников</b> управлять платежами совместно. 
-        Все члены семьи получают уведомления в Telegram. Владелец семьи может добавлять и удалять участников.
-      </Alert>
+      {successMessage && <Alert severity={successMessage.includes('Ошибка') ? 'error' : 'success'} sx={{ mb: 3 }}>{successMessage}</Alert>}
 
-      {/* Приглашения */}
-      {invitations?.data?.length > 0 && (
-        <Card sx={{ mb: 3, border: '2px solid', borderColor: 'primary.main' }}>
+      {/* Мои назначенные платежи */}
+      {myDistributions.length > 0 && (
+        <Card sx={{ mb: 4, border: '2px solid', borderColor: 'warning.main' }}>
           <CardContent>
-            <Typography variant="h6" gutterBottom sx={{ fontWeight: 'bold' }}>
-              📬 Входящие приглашения
+            <Typography variant="h6" gutterBottom sx={{ fontWeight: 'bold', display: 'flex', alignItems: 'center', gap: 1 }}>
+              <WalletIcon color="warning" /> Мои платежи в семье (требуют оплаты)
             </Typography>
-            {invitations.data.map((inv) => (
-              <Box key={inv.id} sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', py: 1 }}>
-                <Typography>
-                  Вас пригласили в <b>{inv.family_name}</b>
-                </Typography>
-                <Box sx={{ display: 'flex', gap: 1 }}>
-                  <Button size="small" variant="contained" color="success" startIcon={<CheckIcon />}>
-                    Принять
-                  </Button>
-                  <Button size="small" variant="outlined" color="error" startIcon={<CloseIcon />}>
-                    Отклонить
-                  </Button>
-                </Box>
-              </Box>
-            ))}
+            <Grid container spacing={2}>
+              {myDistributions.map((dist) => (
+                <Grid item xs={12} md={6} key={dist.id}>
+                  <Paper sx={{ p: 2, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                    <Box>
+                      <Typography variant="subtitle1" fontWeight="bold">{dist.payment_name}</Typography>
+                      <Typography variant="body2" color="text.secondary">Срок: {new Date(dist.due_date).toLocaleDateString('ru-RU')}</Typography>
+                    </Box>
+                    <Box sx={{ textAlign: 'right' }}>
+                      <Typography variant="h6" color="error.main" fontWeight="bold">{dist.amount.toLocaleString('ru-RU')} ₽</Typography>
+                      <Chip label="Ожидает оплаты" color="warning" size="small" />
+                    </Box>
+                  </Paper>
+                </Grid>
+              ))}
+            </Grid>
           </CardContent>
         </Card>
       )}
 
       {/* Список семей */}
-      {families?.data?.map((family) => (
-        <Card key={family.id} sx={{ mb: 3 }}>
-          <CardContent>
-            <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 2 }}>
-              <Box>
-                <Typography variant="h5" sx={{ fontWeight: 'bold' }}>
-                  {family.name}
-                </Typography>
-                <Typography variant="body2" color="text.secondary">
-                  Владелец: {family.owner_username}
-                </Typography>
+      {families && families.length > 0 ? families.map((family) => {
+        // TODO: В будущем сравнивать с реальным userID из JWT токена. Пока хардкод 1 (admin)
+        const isOwner = family.owner_id === 1; 
+        
+        return (
+          <Card key={family.id} sx={{ mb: 3 }}>
+            <CardContent>
+              <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', mb: 2 }}>
+                <Box>
+                  <Typography variant="h5" sx={{ fontWeight: 'bold' }}>{family.name}</Typography>
+                  <Typography variant="body2" color="text.secondary">Владелец: {family.owner_username}</Typography>
+                </Box>
+                <Box sx={{ display: 'flex', gap: 1, alignItems: 'center' }}>
+                  <Chip label={`${family.members?.length || 0}/${family.max_members} уч.`} color="primary" />
+                  {isOwner && (
+                    <Button 
+                      variant="outlined" 
+                      color="error" 
+                      size="small" 
+                      startIcon={<GroupRemoveIcon />} 
+                      onClick={() => {
+                        if(window.confirm('Вы уверены, что хотите распустить семью? Все данные и платежи будут безвозвратно удалены.')) {
+                          disbandMutation.mutate(family.id);
+                        }
+                      }}
+                    >
+                      Распустить
+                    </Button>
+                  )}
+                </Box>
               </Box>
-              <Box sx={{ display: 'flex', gap: 1, alignItems: 'center' }}>
-                <Chip
-                  label={`${family.members.length}/${family.max_members} участников`}
-                  color="primary"
-                />
-                <Chip
-                  label={family.subscription_type}
-                  color="success"
-                  size="small"
-                />
-                <Button
-                  variant="outlined"
-                  startIcon={<PersonAddIcon />}
-                  onClick={() => {
-                    setSelectedFamily(family);
-                    setInviteDialog(true);
-                  }}
-                >
-                  Пригласить
-                </Button>
-              </Box>
-            </Box>
+              <Divider sx={{ my: 2 }} />
 
-            <Divider sx={{ my: 2 }} />
-
-            {/* Код приглашения */}
-            <Paper sx={{ p: 2, mb: 2, bgcolor: 'background.default' }}>
-              <Typography variant="body2" color="text.secondary" gutterBottom>
-                Код приглашения:
-              </Typography>
-              <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-                <Typography variant="body1" sx={{ fontFamily: 'monospace', fontWeight: 'bold', fontSize: '1.1rem' }}>
-                  {family.invite_code}
-                </Typography>
-                <IconButton size="small" onClick={() => copyInviteCode(family.invite_code)}>
+              {/* Код приглашения */}
+              <Paper sx={{ p: 2, mb: 3, bgcolor: 'background.default', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                <Box>
+                  <Typography variant="body2" color="text.secondary">Код приглашения для участников:</Typography>
+                  <Typography variant="h6" sx={{ fontFamily: 'monospace', fontWeight: 'bold', color: 'primary.main' }}>{family.invite_code}</Typography>
+                </Box>
+                <IconButton onClick={() => copyInviteCode(family.invite_code)} color="primary">
                   <CopyIcon />
                 </IconButton>
-              </Box>
-            </Paper>
+              </Paper>
 
-            {/* Участники */}
-            <Typography variant="subtitle1" gutterBottom sx={{ fontWeight: 'bold' }}>
-              Участники:
-            </Typography>
-            <List>
-              {family.members.map((member) => (
-                <ListItem key={member.id} divider>
-                  <Avatar sx={{ mr: 2, bgcolor: getRoleColor(member.role) === 'primary' ? 'primary.main' : getRoleColor(member.role) === 'secondary' ? 'secondary.main' : 'grey.500' }}>
-                    {member.username[0].toUpperCase()}
-                  </Avatar>
-                  <ListItemText
-                    primary={member.username}
-                    secondary={`Присоединился: ${new Date(member.joined_at).toLocaleDateString('ru-RU')}`}
-                  />
-                  <Chip
-                    label={getRoleLabel(member.role)}
-                    color={getRoleColor(member.role)}
-                    size="small"
-                    sx={{ mr: 2 }}
-                  />
-                  <ListItemSecondaryAction>
-                    {member.role !== 'owner' && (
-                      <IconButton 
-                        edge="end" 
-                        color="error"
-                        onClick={() => handleRemoveMember(family.id, member.id)}
-                      >
-                        <DeleteIcon />
-                      </IconButton>
-                    )}
-                  </ListItemSecondaryAction>
-                </ListItem>
-              ))}
-            </List>
-
-            {/* Общие платежи */}
-            {family.shared_payments?.length > 0 && (
-              <>
-                <Divider sx={{ my: 2 }} />
-                <Typography variant="subtitle1" gutterBottom sx={{ fontWeight: 'bold' }}>
-                  Общие платежи семьи:
-                </Typography>
-                <Grid container spacing={2}>
-                  {family.shared_payments.map((payment) => (
-                    <Grid item xs={12} sm={6} key={payment.id}>
-                      <Paper sx={{ p: 2 }}>
-                        <Typography variant="body1" fontWeight="bold">
-                          {payment.name}
-                        </Typography>
-                        <Typography variant="h6" color="primary">
-                          {payment.amount.toLocaleString('ru-RU')} {payment.currency}
-                        </Typography>
-                      </Paper>
-                    </Grid>
-                  ))}
+              <Grid container spacing={3}>
+                {/* Участники */}
+                <Grid item xs={12} md={6}>
+                  <Typography variant="subtitle1" gutterBottom sx={{ fontWeight: 'bold' }}>Участники:</Typography>
+                  <List dense>
+                    {family.members?.map((member) => (
+                      <ListItem key={member.id} sx={{ px: 0 }}>
+                        <Avatar sx={{ mr: 2, bgcolor: member.role === 'owner' ? 'primary.main' : 'grey.500' }}>
+                          {member.username[0].toUpperCase()}
+                        </Avatar>
+                        <ListItemText 
+                          primary={member.username} 
+                          secondary={`Присоединился: ${new Date(member.joined_at).toLocaleDateString('ru-RU')}`} 
+                        />
+                        <Chip label={getRoleLabel(member.role)} color={member.role === 'owner' ? 'primary' : 'default'} size="small" />
+                      </ListItem>
+                    ))}
+                  </List>
                 </Grid>
-              </>
-            )}
-          </CardContent>
-        </Card>
-      ))}
 
-      {/* Диалог создания семьи */}
-      <Dialog open={dialogOpen} onClose={() => setDialogOpen(false)}>
+                {/* Общие платежи */}
+                <Grid item xs={12} md={6}>
+<Typography variant="subtitle1" sx={{ fontWeight: 'bold', mb: 1 }}>Общие платежи семьи:</Typography>
+                  
+                  {family.shared_payments?.length > 0 ? (
+                    <List dense>
+                      {family.shared_payments.map((payment) => (
+                        <ListItem key={payment.id} sx={{ px: 0, borderBottom: '1px solid', borderColor: 'divider' }}>
+                          <ListItemText 
+                            primary={payment.name} 
+                            secondary={`Срок: ${new Date(payment.due_date).toLocaleDateString('ru-RU')}`} 
+                          />
+                          <Box sx={{ textAlign: 'right', mr: 2 }}>
+                            <Typography fontWeight="bold">{payment.amount.toLocaleString('ru-RU')} {payment.currency}</Typography>
+                            <Chip 
+                              label={payment.status === 'pending' ? 'Не распределен' : 'Распределен'} 
+                              color={payment.status === 'pending' ? 'warning' : 'success'} 
+                              size="small" 
+                            />
+                          </Box>
+                          {payment.status === 'pending' && isOwner && (
+                            <ListItemSecondaryAction>
+                              <Button 
+                                variant="contained" 
+                                size="small" 
+                                startIcon={<PersonAddIcon />} 
+                                onClick={() => handleOpenDistribute(payment, family.members)}
+                              >
+                                Распределить
+                              </Button>
+                            </ListItemSecondaryAction>
+                          )}
+                        </ListItem>
+                      ))}
+                    </List>
+                  ) : (
+                    <Typography variant="body2" color="text.secondary" sx={{ p: 2 }}>Нет общих платежей</Typography>
+                  )}
+                </Grid>
+              </Grid>
+            </CardContent>
+          </Card>
+        );
+      }) : (
+        <Alert severity="info">У вас пока нет семей. Создайте первую семью или вступите в существующую по коду приглашения.</Alert>
+      )}
+
+      {/* === ДИАЛОГИ === */}
+
+      {/* 1. Диалог создания семьи */}
+      <Dialog open={dialogOpen} onClose={() => setDialogOpen(false)} maxWidth="sm" fullWidth>
         <DialogTitle>Создать семью</DialogTitle>
         <DialogContent>
-          <TextField
-            autoFocus
-            margin="dense"
-            label="Название семьи"
-            fullWidth
-            value={newFamilyName}
-            onChange={(e) => setNewFamilyName(e.target.value)}
+          <TextField 
+            autoFocus 
+            margin="dense" 
+            label="Название семьи" 
+            fullWidth 
+            value={newFamilyName} 
+            onChange={(e) => setNewFamilyName(e.target.value)} 
             helperText="Например: Семья Ивановых"
           />
-          <Typography variant="body2" color="text.secondary" sx={{ mt: 2 }}>
-            Максимальное количество участников: <b>5 человек</b>
-          </Typography>
         </DialogContent>
         <DialogActions>
           <Button onClick={() => setDialogOpen(false)}>Отмена</Button>
           <Button 
-            onClick={handleCreateFamily} 
-            variant="contained"
-            disabled={!newFamilyName || createMutation.isLoading}
+            onClick={() => createMutation.mutate({ name: newFamilyName, max_members: 5 })} 
+            variant="contained" 
+            disabled={!newFamilyName || createMutation.isPending}
           >
-            {createMutation.isLoading ? 'Создание...' : 'Создать'}
+            {createMutation.isPending ? 'Создание...' : 'Создать'}
           </Button>
         </DialogActions>
       </Dialog>
 
-      {/* Диалог приглашения */}
-      <Dialog open={inviteDialog} onClose={() => setInviteDialog(false)}>
-        <DialogTitle>Пригласить участника</DialogTitle>
+      {/* 2. Диалог вступления в семью */}
+      <Dialog open={joinDialogOpen} onClose={() => setJoinDialogOpen(false)} maxWidth="sm" fullWidth>
+        <DialogTitle>Вступить в семью</DialogTitle>
         <DialogContent>
-          <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
-            Введите username пользователя для приглашения в семью "{selectedFamily?.name}"
-          </Typography>
-          <TextField
-            autoFocus
-            margin="dense"
-            label="Username"
-            fullWidth
-            value={inviteUsername}
-            onChange={(e) => setInviteUsername(e.target.value)}
-            helperText="Пользователь получит уведомление в Telegram"
+          <TextField 
+            autoFocus 
+            margin="dense" 
+            label="Код приглашения" 
+            fullWidth 
+            value={joinCode} 
+            onChange={(e) => setJoinCode(e.target.value.toUpperCase())} 
+            helperText="Введите код, который вам дал владелец семьи"
           />
         </DialogContent>
         <DialogActions>
-          <Button onClick={() => setInviteDialog(false)}>Отмена</Button>
+          <Button onClick={() => setJoinDialogOpen(false)}>Отмена</Button>
           <Button 
-            onClick={handleInvite} 
-            variant="contained"
-            disabled={!inviteUsername || inviteMutation.isLoading}
+            onClick={() => joinMutation.mutate({ invite_code: joinCode })} 
+            variant="contained" 
+            disabled={!joinCode || joinMutation.isPending}
           >
-            {inviteMutation.isLoading ? 'Отправка...' : 'Отправить приглашение'}
+            {joinMutation.isPending ? 'Проверка...' : 'Вступить'}
+          </Button>
+        </DialogActions>
+      </Dialog>
+
+      {/* 3. Диалог создания общего платежа */}
+
+
+      {/* 4. Диалог распределения платежа */}
+      <Dialog open={distributeDialogOpen} onClose={() => setDistributeDialogOpen(false)} maxWidth="sm" fullWidth>
+        <DialogTitle>Распределение платежа</DialogTitle>
+        <DialogContent>
+          {selectedPayment && (
+            <Box sx={{ mt: 1 }}>
+              <Box sx={{ display: 'flex', justifyContent: 'space-between', mb: 2, p: 2, bgcolor: 'grey.100', borderRadius: 1 }}>
+                <Typography variant="subtitle1" fontWeight="bold">{selectedPayment.name}</Typography>
+                <Typography variant="h6" color="primary.main" fontWeight="bold">
+                  {selectedPayment.amount.toLocaleString('ru-RU')} {selectedPayment.currency}
+                </Typography>
+              </Box>
+              <Typography variant="body2" color="text.secondary" gutterBottom>
+                Укажите сумму для каждого участника. Общая сумма должна быть равна сумме платежа.
+              </Typography>
+              {selectedPayment.members.map((member) => (
+                <TextField 
+                  key={member.id} 
+                  margin="dense" 
+                  label={`Сумма для ${member.username} (${getRoleLabel(member.role)})`} 
+                  type="number" 
+                  fullWidth
+                  value={distributions[member.id] || 0} 
+                  onChange={(e) => handleDistributionChange(member.id, e.target.value)}
+                  InputProps={{ 
+                    endAdornment: <InputAdornment position="end">{selectedPayment.currency}</InputAdornment> 
+                  }} 
+                />
+              ))}
+              <Box sx={{ mt: 2, p: 2, borderRadius: 1, display: 'flex', alignItems: 'center', gap: 1,
+                bgcolor: isDistributionValid ? 'success.light' : 'error.light', 
+                color: isDistributionValid ? 'success.dark' : 'error.dark'
+              }}>
+                {isDistributionValid ? <CheckCircleIcon /> : <WarningIcon />}
+                <Typography fontWeight="bold">
+                  Распределено: {totalDistributed.toLocaleString('ru-RU')} из {selectedPayment.amount.toLocaleString('ru-RU')} {selectedPayment.currency}
+                  {!isDistributionValid && ' (Суммы не совпадают!)'}
+                </Typography>
+              </Box>
+            </Box>
+          )}
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setDistributeDialogOpen(false)}>Отмена</Button>
+          <Button 
+            onClick={handleDistributeSubmit} 
+            variant="contained" 
+            disabled={!isDistributionValid || distributeMutation.isPending}
+          >
+            {distributeMutation.isPending ? 'Распределение...' : 'Подтвердить распределение'}
           </Button>
         </DialogActions>
       </Dialog>

@@ -29,8 +29,6 @@ export function Login() {
       }
 
       const data = await res.json();
-      
-      // Сохраняем реальный токен и данные пользователя
       setAuth(data.token, data.user);
       navigate('/');
     } catch (err) {
@@ -41,23 +39,8 @@ export function Login() {
   };
 
   return (
-    <Box 
-      sx={{ 
-        minHeight: '100vh', 
-        display: 'flex', 
-        alignItems: 'center', 
-        justifyContent: 'center', 
-        p: 2,
-        bgcolor: 'background.default' // ✅ FIX 1: Фон страницы адаптируется под тему
-      }}
-    >
-      <Card 
-        sx={{ 
-          maxWidth: 400, 
-          width: '100%',
-          bgcolor: 'background.paper' // ✅ FIX 2: Фон карточки адаптируется под тему
-        }}
-      >
+    <Box sx={{ minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center', p: 2, bgcolor: 'background.default' }}>
+      <Card sx={{ maxWidth: 400, width: '100%', bgcolor: 'background.paper' }}>
         <CardContent sx={{ p: 4 }}>
           <Typography variant="h4" align="center" gutterBottom sx={{ fontWeight: 'bold', color: 'primary.main' }}>
             Invoice Keeper
@@ -68,40 +51,16 @@ export function Login() {
 
           <form onSubmit={handleSubmit}>
             <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
-              <TextField
-                label="Логин"
-                value={username}
-                onChange={(e) => setUsername(e.target.value)}
-                required
-                autoFocus
-                fullWidth
-              />
-              <TextField
-                label="Пароль"
-                type="password"
-                value={password}
-                onChange={(e) => setPassword(e.target.value)}
-                required
-                fullWidth
-              />
-
+              <TextField label="Логин" value={username} onChange={(e) => setUsername(e.target.value)} required autoFocus fullWidth />
+              <TextField label="Пароль" type="password" value={password} onChange={(e) => setPassword(e.target.value)} required fullWidth />
               {error && <Alert severity="error">{error}</Alert>}
-
-              <Box 
-                sx={{ 
-                  mt: 1, 
-                  p: 2, 
-                  bgcolor: 'action.hover', // ✅ FIX 3: Заменили 'grey.100' на адаптивный цвет
-                  borderRadius: 1 
-                }}
-              >
+              <Box sx={{ mt: 1, p: 2, bgcolor: 'action.hover', borderRadius: 1 }}>
                 <Typography variant="caption" color="text.secondary">
                   <b>Тестовые данные:</b><br />
                   Логин: <code>admin</code><br />
                   Пароль: <code>AdminPass123!</code>
                 </Typography>
               </Box>
-
               <Button type="submit" fullWidth size="large" disabled={isLoading}>
                 {isLoading ? 'Вход...' : 'Войти'}
               </Button>
