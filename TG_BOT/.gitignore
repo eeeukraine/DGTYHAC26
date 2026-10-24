@@ -1,0 +1,28 @@
+# Секреты
+.env
+.env.local
+*.env
+!.env.example
+
+# Виртуальное окружение Python
+venv/
+.venv/
+env/
+
+# Кэш Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+*.egg-info/
+dist/
+build/
+
+# Локальные данные бота
+users.json
+*.log
+
+# IDE
+.vscode/
+.idea/
+*.swp
