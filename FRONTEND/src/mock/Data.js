@@ -149,3 +149,37 @@ export const mockPaymentSummary = {
   USD: 500,
   EUR: 90,
 };
+// Моковые семьи
+export const mockFamilies = [
+  {
+    id: 1,
+    name: 'Семья Ивановых',
+    owner_id: 1,
+    owner_username: 'admin',
+    max_members: 5,
+    subscription_type: 'family',
+    invite_code: 'FAM-ABC123',
+    created_at: '2024-01-15T10:00:00Z',
+    members: [
+      { id: 1, username: 'admin', role: 'owner', joined_at: '2024-01-15T10:00:00Z' },
+      { id: 2, username: 'maria_sidorova', role: 'member', joined_at: '2024-02-01T14:30:00Z' },
+      { id: 3, username: 'ivan_petrov', role: 'admin', joined_at: '2024-02-10T09:15:00Z' },
+    ],
+    shared_payments: [
+      { id: 1, name: 'Аренда квартиры', amount: 50000, currency: 'RUB' },
+      { id: 2, name: 'Интернет', amount: 800, currency: 'RUB' },
+    ],
+  },
+];
+
+// Моковые приглашения
+export const mockInvitations = [
+  {
+    id: 1,
+    family_id: 1,
+    family_name: 'Семья Ивановых',
+    invited_by: 'admin',
+    status: 'pending',
+    created_at: '2024-10-20T10:00:00Z',
+  },
+];
