@@ -1,16 +1,8 @@
 import axios from 'axios';
 import { useAuthStore } from '../store/authStore';
-import {
-  USE_MOCK_DATA,
-  mockUsers,
-  mockRecurringPayments,
-  mockPaymentOccurrences,
-  mockPaymentSummary,
-} from '../mock/Data.js';
 
 const client = axios.create({
-  baseURL: '/api/v1',
-  withCredentials: true,
+  baseURL: 'http://localhost:8080/api/v1',
   headers: {
     'Content-Type': 'application/json',
   },
@@ -35,21 +27,18 @@ client.interceptors.response.use(
   }
 );
 
-// Моковые функции для имитации API
-const mockApi = {
-  getRecurringPayments: () => Promise.resolve({ data: mockRecurringPayments }),
-  getPaymentOccurrences: () => Promise.resolve({ data: mockPaymentOccurrences }),
-  getPaymentSummary: () => Promise.resolve({ data: mockPaymentSummary }),
-  getUsers: () => Promise.resolve({ data: mockUsers }),
-  createRecurringPayment: (data) => Promise.resolve({ data: { id: Date.now(), ...data } }),
-  deleteRecurringPayment: (id) => Promise.resolve({ data: { success: true } }),
-  patchPaymentOccurrence: (id, data) => Promise.resolve({ data: { id, ...data } }),
-  createUser: (data) => Promise.resolve({ data: { id: Date.now(), ...data } }),
-  patchUser: (id, data) => Promise.resolve({ data: { id, ...data } }),
-  deleteUser: (id) => Promise.resolve({ data: { success: true } }),
+// Реальные методы API (без моков)
+const apiClient = {
+  getRecurringPayments: () => client.get('/payments').then(res => ({ data: res.data })),
+  getPaymentOccurrences: () => client.get('/payment-occurrences').then(res => ({ data: res.data })),
+  getPaymentSummary: () => client.get('/payments/summary').then(res => ({ data: res.data })),
+  getUsers: () => client.get('/users').then(res => ({ data: res.data })),
+  createRecurringPayment: (data) => client.post('/payments', data).then(res => ({ data: res.data })),
+  deleteRecurringPayment: (id) => client.delete(`/payments/${id}`).then(res => ({ data: res.data })),
+  patchPaymentOccurrence: (id, data) => client.patch(`/payment-occurrences/${id}`, data).then(res => ({ data: res.data })),
+  createUser: (data) => client.post('/users', data).then(res => ({ data: res.data })),
+  patchUser: (id, data) => client.patch(`/users/${id}`, data).then(res => ({ data: res.data })),
+  deleteUser: (id) => client.delete(`/users/${id}`).then(res => ({ data: res.data })),
 };
-
-// Экспортируем клиент с моками
-const apiClient = USE_MOCK_DATA ? mockApi : client;
 
 export default apiClient;

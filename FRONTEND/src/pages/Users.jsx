@@ -1,44 +1,74 @@
 import { useState } from 'react';
 import {
-  Box,
-  Typography,
-  Table,
-  TableBody,
-  TableCell,
-  TableContainer,
-  TableHead,
-  TableRow,
-  Paper,
-  IconButton,
-  Button,
-  Dialog,
-  DialogTitle,
-  DialogContent,
-  DialogActions,
-  TextField,
-  Chip,
-  Alert,
+  Box, Typography, Table, TableBody, TableCell, TableContainer, TableHead,
+  TableRow, Paper, IconButton, Button, Dialog, DialogTitle, DialogContent,
+  DialogActions, TextField, Chip, Alert, MenuItem
 } from '@mui/material';
 import { Delete as DeleteIcon, Edit as EditIcon, Add as AddIcon } from '@mui/icons-material';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import apiClient from '../api/client';
+
+const API_BASE = 'http://localhost:8080/api/v1';
 
 export function Users() {
   const [dialogOpen, setDialogOpen] = useState(false);
   const [selectedUser, setSelectedUser] = useState(null);
+  const [formData, setFormData] = useState({ username: '', password: '', role: 'user' });
   const [successMessage, setSuccessMessage] = useState('');
   const queryClient = useQueryClient();
 
-  const { data: users, isLoading } = useQuery({
+  const { data: users, isLoading, error } = useQuery({
     queryKey: ['users'],
-    queryFn: () => apiClient.getUsers(),
+    queryFn: async () => {
+      const res = await fetch(`${API_BASE}/users`);
+      if (!res.ok) throw new Error('Failed to fetch');
+      return res.json(); // Возвращает массив напрямую, не {data: [...]}
+    },
   });
 
   const deleteMutation = useMutation({
-    mutationFn: (id) => apiClient.deleteUser(id),
+    mutationFn: async (id) => {
+      const res = await fetch(`${API_BASE}/users/${id}`, { method: 'DELETE' });
+      if (!res.ok) throw new Error('Failed to delete');
+    },
     onSuccess: () => {
-      queryClient.invalidateQueries(['users']);
+      queryClient.invalidateQueries({ queryKey: ['users'] });
       setSuccessMessage('Пользователь удалён');
+      setTimeout(() => setSuccessMessage(''), 3000);
+    },
+  });
+
+  const createMutation = useMutation({
+    mutationFn: async (data) => {
+      const res = await fetch(`${API_BASE}/users`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(data),
+      });
+      if (!res.ok) throw new Error('Failed to create');
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['users'] });
+      setDialogOpen(false);
+      setFormData({ username: '', password: '', role: 'user' });
+      setSuccessMessage('Пользователь создан');
+      setTimeout(() => setSuccessMessage(''), 3000);
+    },
+  });
+
+  const updateMutation = useMutation({
+    mutationFn: async ({ id, data }) => {
+      const res = await fetch(`${API_BASE}/users/${id}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(data),
+      });
+      if (!res.ok) throw new Error('Failed to update');
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['users'] });
+      setDialogOpen(false);
+      setSelectedUser(null);
+      setSuccessMessage('Пользователь обновлён');
       setTimeout(() => setSuccessMessage(''), 3000);
     },
   });
@@ -51,38 +81,38 @@ export function Users() {
 
   const handleOpenDialog = (user = null) => {
     setSelectedUser(user);
+    if (user) {
+      setFormData({ username: user.username, password: '', role: user.role });
+    } else {
+      setFormData({ username: '', password: '', role: 'user' });
+    }
     setDialogOpen(true);
   };
 
-  const handleCloseDialog = () => {
-    setDialogOpen(false);
-    setSelectedUser(null);
+  const handleSave = () => {
+    if (selectedUser) {
+      updateMutation.mutate({ 
+        id: selectedUser.id, 
+        data: { username: formData.username, role: formData.role } 
+      });
+    } else {
+      createMutation.mutate(formData);
+    }
   };
 
-  if (isLoading) {
-    return <Typography>Загрузка...</Typography>;
-  }
+  if (isLoading) return <Typography>Загрузка...</Typography>;
+  if (error) return <Alert severity="error">Ошибка загрузки пользователей</Alert>;
 
   return (
     <Box>
       <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 3 }}>
-        <Typography variant="h4" sx={{ fontWeight: 'bold' }}>
-          Пользователи
-        </Typography>
-        <Button
-          variant="contained"
-          startIcon={<AddIcon />}
-          onClick={() => handleOpenDialog()}
-        >
+        <Typography variant="h4" sx={{ fontWeight: 'bold' }}>Пользователи</Typography>
+        <Button variant="contained" startIcon={<AddIcon />} onClick={() => handleOpenDialog()}>
           Добавить пользователя
         </Button>
       </Box>
 
-      {successMessage && (
-        <Alert severity="success" sx={{ mb: 2 }}>
-          {successMessage}
-        </Alert>
-      )}
+      {successMessage && <Alert severity="success" sx={{ mb: 2 }}>{successMessage}</Alert>}
 
       <TableContainer component={Paper}>
         <Table>
@@ -96,69 +126,46 @@ export function Users() {
             </TableRow>
           </TableHead>
           <TableBody>
-            {users?.data?.map((user) => (
+            {users && users.length > 0 ? users.map((user) => (
               <TableRow key={user.id} hover>
                 <TableCell>{user.id}</TableCell>
                 <TableCell>{user.username}</TableCell>
                 <TableCell>
-                  <Chip
-                    label={user.role === 'admin' ? 'Администратор' : 'Пользователь'}
-                    color={user.role === 'admin' ? 'primary' : 'default'}
-                    size="small"
-                  />
+                  <Chip label={user.role === 'admin' ? 'Администратор' : 'Пользователь'} color={user.role === 'admin' ? 'primary' : 'default'} size="small" />
                 </TableCell>
                 <TableCell>{new Date(user.created_at).toLocaleDateString('ru-RU')}</TableCell>
                 <TableCell>
-                  <IconButton onClick={() => handleOpenDialog(user)} size="small">
-                    <EditIcon />
-                  </IconButton>
+                  <IconButton onClick={() => handleOpenDialog(user)} size="small" color="primary"><EditIcon /></IconButton>
                   {user.role !== 'admin' && (
-                    <IconButton onClick={() => handleDelete(user.id)} size="small" color="error">
-                      <DeleteIcon />
-                    </IconButton>
+                    <IconButton onClick={() => handleDelete(user.id)} size="small" color="error"><DeleteIcon /></IconButton>
                   )}
                 </TableCell>
               </TableRow>
-            ))}
+            )) : (
+              <TableRow><TableCell colSpan={5} align="center">Нет пользователей</TableCell></TableRow>
+            )}
           </TableBody>
         </Table>
       </TableContainer>
 
-      {/* Диалог создания/редактирования */}
-      <Dialog open={dialogOpen} onClose={handleCloseDialog} maxWidth="sm" fullWidth>
-        <DialogTitle>
-          {selectedUser ? 'Редактировать пользователя' : 'Добавить пользователя'}
-        </DialogTitle>
+      <Dialog open={dialogOpen} onClose={() => setDialogOpen(false)} maxWidth="sm" fullWidth>
+        <DialogTitle>{selectedUser ? 'Редактировать пользователя' : 'Добавить пользователя'}</DialogTitle>
         <DialogContent>
           <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2, mt: 2 }}>
-            <TextField
-              label="Имя пользователя"
-              defaultValue={selectedUser?.username || ''}
-              fullWidth
-              required
-            />
-            <TextField
-              label="Пароль"
-              type="password"
-              fullWidth
-              required={!selectedUser}
-            />
-            <TextField
-              label="Роль"
-              select
-              defaultValue={selectedUser?.role || 'user'}
-              fullWidth
-              SelectProps={{ native: true }}
-            >
-              <option value="user">Пользователь</option>
-              <option value="admin">Администратор</option>
+            <TextField label="Имя пользователя" value={formData.username} onChange={(e) => setFormData({...formData, username: e.target.value})} fullWidth required />
+            {!selectedUser && (
+              <TextField label="Пароль" type="password" value={formData.password} onChange={(e) => setFormData({...formData, password: e.target.value})} fullWidth required />
+            )}
+            <TextField label="Роль" select value={formData.role} onChange={(e) => setFormData({...formData, role: e.target.value})} fullWidth>
+              <MenuItem value="user">Пользователь</MenuItem>
+              <MenuItem value="admin">Администратор</MenuItem>
             </TextField>
           </Box>
         </DialogContent>
         <DialogActions>
-          <Button onClick={handleCloseDialog}>Отмена</Button>
-          <Button onClick={handleCloseDialog} variant="contained">
-            {selectedUser ? 'Сохранить' : 'Создать'}
+          <Button onClick={() => setDialogOpen(false)}>Отмена</Button>
+          <Button onClick={handleSave} variant="contained" disabled={createMutation.isPending || updateMutation.isPending}>
+            {createMutation.isPending || updateMutation.isPending ? 'Сохранение...' : 'Сохранить'}
           </Button>
         </DialogActions>
       </Dialog>

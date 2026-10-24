@@ -1,57 +1,50 @@
 import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import {
-  Box,
-  Card,
-  CardContent,
-  Typography,
-  Alert,
-} from '@mui/material';
+import { Box, Card, CardContent, Typography, Alert, TextField } from '@mui/material';
 import { useAuthStore } from '../store/authStore';
 import { Button } from '../components/ui/Button';
-import { Input } from '../components/ui/Input';
 
 export function Login() {
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
   const [error, setError] = useState('');
+  const [isLoading, setIsLoading] = useState(false);
   const navigate = useNavigate();
   const { setAuth } = useAuthStore();
 
-  const handleSubmit = (e) => {
+  const handleSubmit = async (e) => {
     e.preventDefault();
     setError('');
+    setIsLoading(true);
 
-    // Моковая авторизация
-    const isAdmin = username === 'admin';
-    
-    setAuth('mock-token-123', {
-      id: isAdmin ? 1 : 2,
-      username: username,
-      role: isAdmin ? 'admin' : 'user',
-    });
+    try {
+      const res = await fetch('http://localhost:8080/api/v1/auth/login', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ username, password }),
+      });
 
-    navigate('/');
+      if (!res.ok) {
+        throw new Error('Неверный логин или пароль');
+      }
+
+      const data = await res.json();
+      
+      // Сохраняем реальный токен и данные пользователя
+      setAuth(data.token, data.user);
+      navigate('/');
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setIsLoading(false);
+    }
   };
 
   return (
-    <Box
-      sx={{
-        minHeight: '100vh',
-        display: 'flex',
-        alignItems: 'center',
-        justifyContent: 'center',
-        p: 2,
-      }}
-    >
+    <Box sx={{ minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center', p: 2 }}>
       <Card sx={{ maxWidth: 400, width: '100%' }}>
         <CardContent sx={{ p: 4 }}>
-          <Typography
-            variant="h4"
-            align="center"
-            gutterBottom
-            sx={{ fontWeight: 'bold', color: 'primary.main' }}
-          >
+          <Typography variant="h4" align="center" gutterBottom sx={{ fontWeight: 'bold', color: 'primary.main' }}>
             Invoice Keeper
           </Typography>
           <Typography variant="body2" align="center" color="text.secondary" sx={{ mb: 3 }}>
@@ -60,19 +53,21 @@ export function Login() {
 
           <form onSubmit={handleSubmit}>
             <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
-              <Input
+              <TextField
                 label="Логин"
                 value={username}
                 onChange={(e) => setUsername(e.target.value)}
                 required
                 autoFocus
+                fullWidth
               />
-              <Input
+              <TextField
                 label="Пароль"
                 type="password"
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
                 required
+                fullWidth
               />
 
               {error && <Alert severity="error">{error}</Alert>}
@@ -80,17 +75,13 @@ export function Login() {
               <Box sx={{ mt: 1, p: 2, bgcolor: 'grey.100', borderRadius: 1 }}>
                 <Typography variant="caption" color="text.secondary">
                   <b>Тестовые данные:</b><br />
-                  Админ: логин <code>admin</code>, любой пароль<br />
-                  Пользователь: любой другой логин
+                  Логин: <code>admin</code><br />
+                  Пароль: <code>AdminPass123!</code>
                 </Typography>
               </Box>
 
-              <Button
-                type="submit"
-                fullWidth
-                size="large"
-              >
-                Войти
+              <Button type="submit" fullWidth size="large" disabled={isLoading}>
+                {isLoading ? 'Вход...' : 'Войти'}
               </Button>
             </Box>
           </form>

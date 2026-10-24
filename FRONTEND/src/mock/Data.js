@@ -1,4 +1,4 @@
-export const USE_MOCK_DATA = true; // Переключатель: true = моки, false = реальный API
+export const USE_MOCK_DATA = false; // Переключатель: true = моки, false = реальный API
 
 // Моковые пользователи
 export const mockUsers = [
