@@ -20,14 +20,13 @@ func NewFamilyHandler(db *sql.DB) *FamilyHandler {
 	return &FamilyHandler{DB: db}
 }
 
-// GetMyFamilies — получает все семьи, в которых состоит пользователь
+// GetMyFamilies — получает семьи пользователя со всеми вложенными данными
 func (h *FamilyHandler) GetMyFamilies(w http.ResponseWriter, r *http.Request) {
 	userID := middleware.GetUserID(r)
 
+	// 1. Получаем базовые данные семей
 	rows, err := h.DB.Query(`
-		SELECT f.id, f.name, f.owner_id, f.invite_code, f.max_members,
-			   u.username as owner_name,
-			   (SELECT COUNT(*) FROM family_members WHERE family_id = f.id) as member_count
+		SELECT f.id, f.name, f.owner_id, f.invite_code, f.max_members, u.username as owner_name
 		FROM families f
 		JOIN family_members fm ON f.id = fm.family_id
 		JOIN users u ON f.owner_id = u.id
@@ -45,17 +44,81 @@ func (h *FamilyHandler) GetMyFamilies(w http.ResponseWriter, r *http.Request) {
 	for rows.Next() {
 		var id int64
 		var name, ownerName, inviteCode string
-		var ownerID, maxMembers, memberCount int
-		rows.Scan(&id, &name, &ownerID, &inviteCode, &maxMembers, &ownerName, &memberCount)
+		var ownerID, maxMembers int
+		rows.Scan(&id, &name, &ownerID, &inviteCode, &maxMembers, &ownerName)
 
+		// 2. Получаем участников этой семьи
+		memRows, _ := h.DB.Query(`
+			SELECT u.id, u.username, fm.role, fm.joined_at
+			FROM family_members fm
+			JOIN users u ON fm.user_id = u.id
+			WHERE fm.family_id = ?
+		`, id)
+		
+		var members []map[string]interface{}
+		for memRows.Next() {
+			var mID int64
+			var mUsername, mRole string
+			var mJoinedAt time.Time
+			memRows.Scan(&mID, &mUsername, &mRole, &mJoinedAt)
+			members = append(members, map[string]interface{}{
+				"id": mID, "username": mUsername, "role": mRole, "joined_at": mJoinedAt,
+			})
+		}
+		memRows.Close()
+
+		// 3. Получаем общие платежи этой семьи
+		payRows, _ := h.DB.Query(`
+			SELECT id, name, total_amount as amount, currency, due_date, status
+			FROM shared_payments
+			WHERE family_id = ?
+			ORDER BY created_at DESC
+		`, id)
+		
+		var payments []map[string]interface{}
+		for payRows.Next() {
+			var pID int64
+			var pName, pCurrency, pDueDate, pStatus string
+			var pAmount float64
+			payRows.Scan(&pID, &pName, &pAmount, &pCurrency, &pDueDate, &pStatus)
+			payments = append(payments, map[string]interface{}{
+				"id": pID, "name": pName, "amount": pAmount, "currency": pCurrency,
+				"due_date": pDueDate, "status": pStatus,
+			})
+		}
+		payRows.Close()
+
+		// 4. Получаем МОИ распределенные доли в этой семье (pending)
+		distRows, _ := h.DB.Query(`
+			SELECT d.id, sp.name as payment_name, d.assigned_amount as amount, sp.due_date, d.status
+			FROM distributions d
+			JOIN shared_payments sp ON d.shared_payment_id = sp.id
+			WHERE d.user_id = ? AND sp.family_id = ? AND d.status = 'pending'
+		`, userID, id)
+		
+		var dists []map[string]interface{}
+		for distRows.Next() {
+			var dID int64
+			var dName, dDueDate, dStatus string
+			var dAmount float64
+			distRows.Scan(&dID, &dName, &dAmount, &dDueDate, &dStatus)
+			dists = append(dists, map[string]interface{}{
+				"id": dID, "payment_name": dName, "amount": dAmount, "due_date": dDueDate, "status": dStatus,
+			})
+		}
+		distRows.Close()
+
+		// Собираем всё в один объект
 		families = append(families, map[string]interface{}{
-			"id":           id,
-			"name":         name,
-			"owner_id":     ownerID,
-			"owner_name":   ownerName,
-			"invite_code":  inviteCode,
-			"max_members":  maxMembers,
-			"member_count": memberCount,
+			"id":               id,
+			"name":             name,
+			"owner_id":         ownerID,
+			"owner_username":   ownerName,
+			"invite_code":      inviteCode,
+			"max_members":      maxMembers,
+			"members":          members,
+			"shared_payments":  payments,
+			"my_distributions": dists,
 		})
 	}
 
@@ -78,7 +141,6 @@ func (h *FamilyHandler) CreateFamily(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Генерируем уникальный код приглашения
 	inviteCode := fmt.Sprintf("FAM-%d", time.Now().UnixNano()%1000000000)
 
 	res, err := h.DB.Exec(`
@@ -87,14 +149,11 @@ func (h *FamilyHandler) CreateFamily(w http.ResponseWriter, r *http.Request) {
 	`, req.Name, userID, inviteCode)
 
 	if err != nil {
-		fmt.Println("❌ DB CreateFamily Error:", err)
 		http.Error(w, `{"error":"db insert error"}`, http.StatusInternalServerError)
 		return
 	}
 
 	familyID, _ := res.LastInsertId()
-
-	// Добавляем создателя как участника
 	h.DB.Exec("INSERT INTO family_members (family_id, user_id, role) VALUES (?, ?, 'owner')", familyID, userID)
 
 	w.Header().Set("Content-Type", "application/json")
@@ -153,7 +212,6 @@ func (h *FamilyHandler) DisbandFamily(w http.ResponseWriter, r *http.Request) {
 	familyIDStr := r.PathValue("id")
 	familyID, _ := strconv.ParseInt(familyIDStr, 10, 64)
 
-	// Проверяем, что пользователь — владелец
 	var ownerID int64
 	h.DB.QueryRow("SELECT owner_id FROM families WHERE id = ?", familyID).Scan(&ownerID)
 
@@ -187,7 +245,6 @@ func (h *FamilyHandler) CreateSharedPayment(w http.ResponseWriter, r *http.Reque
 
 	creatorID := middleware.GetUserID(r)
 
-	// 1. Создаем платеж со статусом 'pending_distribution'
 	res, err := h.DB.Exec(`
 		INSERT INTO shared_payments (family_id, name, total_amount, currency, due_date, status, created_by)
 		VALUES (?, ?, ?, ?, ?, 'pending_distribution', ?)
@@ -201,7 +258,6 @@ func (h *FamilyHandler) CreateSharedPayment(w http.ResponseWriter, r *http.Reque
 
 	paymentID, _ := res.LastInsertId()
 
-	// 2. Находим главу семьи (owner_id)
 	var ownerID int64
 	var ownerChatID string
 	err = h.DB.QueryRow(`
@@ -212,7 +268,6 @@ func (h *FamilyHandler) CreateSharedPayment(w http.ResponseWriter, r *http.Reque
 	`, familyID).Scan(&ownerID, &ownerChatID)
 
 	if err == nil && ownerChatID != "" {
-		// 3. Уведомляем ТОЛЬКО главу семьи
 		kafka.PublishEvent(kafka.PaymentEvent{
 			Event:          "distribution_required",
 			PaymentID:      paymentID,
@@ -235,7 +290,6 @@ func (h *FamilyHandler) CreateSharedPayment(w http.ResponseWriter, r *http.Reque
 	})
 }
 
-// DistributionRequest — структура для ручного распределения
 type DistributionRequest struct {
 	Distributions []struct {
 		UserID int64   `json:"user_id"`
@@ -243,7 +297,6 @@ type DistributionRequest struct {
 	} `json:"distributions"`
 }
 
-// DistributePayment — принимает ручное распределение от главы семьи
 func (h *FamilyHandler) DistributePayment(w http.ResponseWriter, r *http.Request) {
 	paymentIDStr := r.PathValue("id")
 	paymentID, _ := strconv.ParseInt(paymentIDStr, 10, 64)
@@ -254,7 +307,6 @@ func (h *FamilyHandler) DistributePayment(w http.ResponseWriter, r *http.Request
 		return
 	}
 
-	// 1. Получаем данные платежа
 	var familyID int64
 	var name, currency, dueDate string
 	var totalAmount float64
@@ -269,20 +321,17 @@ func (h *FamilyHandler) DistributePayment(w http.ResponseWriter, r *http.Request
 		http.Error(w, `{"error":"Платеж не найден"}`, http.StatusNotFound)
 		return
 	}
-
 	if status != "pending_distribution" {
 		http.Error(w, `{"error":"Платеж уже распределен или оплачен"}`, http.StatusBadRequest)
 		return
 	}
 
-	// 2. Транзакция
 	tx, err := h.DB.Begin()
 	if err != nil {
 		http.Error(w, `{"error":"db transaction error"}`, http.StatusInternalServerError)
 		return
 	}
 
-	// 3. Создаем распределения и отправляем уведомления
 	for _, dist := range req.Distributions {
 		_, err = tx.Exec(`
 			INSERT INTO distributions (shared_payment_id, user_id, assigned_amount, status)
@@ -295,7 +344,6 @@ func (h *FamilyHandler) DistributePayment(w http.ResponseWriter, r *http.Request
 			return
 		}
 
-		// Получаем Telegram ID участника
 		var chatID string
 		tx.QueryRow("SELECT COALESCE(telegram_chat_id, '') FROM users WHERE id = ?", dist.UserID).Scan(&chatID)
 
@@ -315,7 +363,6 @@ func (h *FamilyHandler) DistributePayment(w http.ResponseWriter, r *http.Request
 		}
 	}
 
-	// 4. Обновляем статус
 	_, err = tx.Exec("UPDATE shared_payments SET status = 'distributed' WHERE id = ?", paymentID)
 	if err != nil {
 		tx.Rollback()
