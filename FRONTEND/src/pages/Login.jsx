@@ -24,8 +24,13 @@ export function Login() {
         body: JSON.stringify({ username, password }),
       });
 
+      // <-- REDIS: Специальная обработка блокировки (Too Many Requests)
+      if (res.status === 429) {
+        throw new Error('🚫 Слишком много попыток входа! Попробуйте через 15 минут.');
+      }
+
       if (!res.ok) {
-        throw new Error('Неверный логин или пароль');
+        throw new Error('❌ Неверный логин или пароль');
       }
 
       const data = await res.json();
@@ -51,9 +56,29 @@ export function Login() {
 
           <form onSubmit={handleSubmit}>
             <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
-              <TextField label="Логин" value={username} onChange={(e) => setUsername(e.target.value)} required autoFocus fullWidth />
-              <TextField label="Пароль" type="password" value={password} onChange={(e) => setPassword(e.target.value)} required fullWidth />
-              {error && <Alert severity="error">{error}</Alert>}
+              <TextField 
+                label="Логин" 
+                value={username} 
+                onChange={(e) => setUsername(e.target.value)} 
+                required 
+                autoFocus 
+                fullWidth 
+              />
+              <TextField 
+                label="Пароль" 
+                type="password" 
+                value={password} 
+                onChange={(e) => setPassword(e.target.value)} 
+                required 
+                fullWidth 
+              />
+              
+              {error && (
+                <Alert severity={error.includes('Слишком много') ? 'warning' : 'error'} sx={{ mt: 1 }}>
+                  {error}
+                </Alert>
+              )}
+              
               <Box sx={{ mt: 1, p: 2, bgcolor: 'action.hover', borderRadius: 1 }}>
                 <Typography variant="caption" color="text.secondary">
                   <b>Тестовые данные:</b><br />
@@ -61,6 +86,7 @@ export function Login() {
                   Пароль: <code>AdminPass123!</code>
                 </Typography>
               </Box>
+              
               <Button type="submit" fullWidth size="large" disabled={isLoading}>
                 {isLoading ? 'Вход...' : 'Войти'}
               </Button>

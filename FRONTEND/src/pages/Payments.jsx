@@ -4,7 +4,7 @@ import {
   TableRow, Paper, IconButton, Dialog, DialogTitle, DialogContent,
   DialogActions, TextField, Button, Chip, Alert, FormControl, FormLabel, RadioGroup, FormControlLabel, Radio
 } from '@mui/material';
-import { Delete as DeleteIcon, Edit as EditIcon, Add as AddIcon, Person as PersonIcon, Group as GroupIcon } from '@mui/icons-material';
+import { Delete as DeleteIcon, Edit as EditIcon, Add as AddIcon, Person as PersonIcon, Group as GroupIcon, CheckCircle as CheckCircleIcon } from '@mui/icons-material';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useAuthStore } from '../store/authStore';
 import apiClient from '../api/client';
@@ -15,6 +15,11 @@ export function Payments() {
   const [selectedPayment, setSelectedPayment] = useState(null);
   const [dialogOpen, setDialogOpen] = useState(false);
   const [createOpen, setCreateOpen] = useState(false);
+  
+  // <-- НОВОЕ: Состояния для диалога оплаты
+  const [payDialogOpen, setPayDialogOpen] = useState(false);
+  const [paymentToMarkAsPaid, setPaymentToMarkAsPaid] = useState(null);
+  const [actualPaymentDate, setActualPaymentDate] = useState(new Date().toISOString().split('T')[0]);
   
   const [paymentType, setPaymentType] = useState(isAdmin() ? 'user' : 'personal');
   
@@ -59,18 +64,20 @@ export function Payments() {
     },
   });
 
-  // <-- НОВОЕ: Мутация для отметки платежа как оплаченного
+  // <-- ОБНОВЛЕНО: Мутация теперь принимает объект с id и датой
   const markAsPaidMutation = useMutation({
-    mutationFn: async (id) => {
-      // Используем метод из apiClient. Если его нет, бэкендер должен добавить PATCH /payment-occurrences/:id или аналогичный
+    mutationFn: async ({ id, date }) => {
       const res = await apiClient.patchPaymentOccurrence(id, { 
         status: 'paid', 
-        actual_payment_date: new Date().toISOString().split('T')[0] 
+        actual_payment_date: date 
       });
       return res.data;
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['payments'] });
+      setPayDialogOpen(false);
+      setPaymentToMarkAsPaid(null);
+      // Можно заменить alert на Snackbar, если он у тебя есть
       alert('✅ Платёж успешно отмечен как оплаченный!');
     },
     onError: (err) => {
@@ -84,10 +91,20 @@ export function Payments() {
     }
   };
 
-  const handleMarkAsPaid = (id) => {
-    if (window.confirm('Отметить этот платёж как оплаченный?')) {
-      markAsPaidMutation.mutate(id);
-    }
+  // <-- НОВОЕ: Открытие диалога вместо мгновенной отправки
+  const handleOpenPayDialog = (payment) => {
+    setPaymentToMarkAsPaid(payment);
+    setActualPaymentDate(new Date().toISOString().split('T')[0]); // По умолчанию сегодня
+    setPayDialogOpen(true);
+  };
+
+  // <-- НОВОЕ: Подтверждение оплаты с выбранной датой
+  const handleConfirmPayment = () => {
+    if (!paymentToMarkAsPaid || !actualPaymentDate) return;
+    markAsPaidMutation.mutate({ 
+      id: paymentToMarkAsPaid.id, 
+      date: actualPaymentDate 
+    });
   };
 
   const handleCreate = () => {
@@ -154,25 +171,26 @@ export function Payments() {
                 <TableCell>{new Date(payment.next_payment_date).toLocaleDateString('ru-RU')}</TableCell>
                 
                 <TableCell>
-  <Chip 
-    label={!payment.is_active ? '✅ Оплачено' : 'Активен'} 
-    color={!payment.is_active ? 'success' : 'warning'} 
-    size="small" 
-  />
-</TableCell>
+                  <Chip 
+                    label={!payment.is_active ? '✅ Оплачено' : 'Активен'} 
+                    color={!payment.is_active ? 'success' : 'warning'} 
+                    size="small" 
+                  />
+                </TableCell>
 
                 <TableCell sx={{ display: 'flex', alignItems: 'center' }}>
-                  {/* Кнопка "Оплатить" доступна ВСЕМ пользователям */}
+                  {/* Кнопка "Оплатить" теперь открывает диалог */}
                   <Button 
-  size="small" 
-  variant={!payment.is_active ? 'outlined' : 'contained'} 
-  color={!payment.is_active ? 'success' : 'primary'}
-  onClick={() => handleMarkAsPaid(payment.id)}
-  disabled={!payment.is_active || markAsPaidMutation.isPending}
-  sx={{ mr: 1 }}
->
-  {!payment.is_active ? '✅ Оплачено' : 'Оплатить'}
-</Button>
+                    size="small" 
+                    variant={!payment.is_active ? 'outlined' : 'contained'} 
+                    color={!payment.is_active ? 'success' : 'primary'}
+                    startIcon={!payment.is_active ? <CheckCircleIcon /> : null}
+                    onClick={() => handleOpenPayDialog(payment)}
+                    disabled={!payment.is_active || markAsPaidMutation.isPending}
+                    sx={{ mr: 1 }}
+                  >
+                    {!payment.is_active ? 'Оплачено' : 'Оплатить'}
+                  </Button>
 
                   {/* Кнопки управления доступны ТОЛЬКО АДМИНУ */}
                   {isAdmin() && (
@@ -201,6 +219,46 @@ export function Payments() {
           </TableBody>
         </Table>
       </TableContainer>
+
+      {/* <-- НОВОЕ: Диалог подтверждения оплаты с выбором даты */}
+      <Dialog open={payDialogOpen} onClose={() => setPayDialogOpen(false)} maxWidth="xs" fullWidth>
+        <DialogTitle sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+          <CheckCircleIcon color="success" /> Подтверждение оплаты
+        </DialogTitle>
+        <DialogContent>
+          {paymentToMarkAsPaid && (
+            <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2, mt: 1 }}>
+              <Typography variant="body2" color="text.secondary">
+                Вы отмечаете платёж <b>{paymentToMarkAsPaid.name}</b> ({paymentToMarkAsPaid.amount} {paymentToMarkAsPaid.currency}) как выполненный.
+              </Typography>
+              
+              <TextField
+                label="Дата фактической оплаты"
+                type="date"
+                value={actualPaymentDate}
+                onChange={(e) => setActualPaymentDate(e.target.value)}
+                fullWidth
+                InputLabelProps={{ shrink: true }}
+                // Запрещаем выбирать дату в будущем для фактической оплаты
+                inputProps={{ max: new Date().toISOString().split('T')[0] }} 
+              />
+            </Box>
+          )}
+        </DialogContent>
+        <DialogActions sx={{ p: 2, pt: 0 }}>
+          <Button onClick={() => setPayDialogOpen(false)} color="inherit">
+            Отмена
+          </Button>
+          <Button 
+            onClick={handleConfirmPayment} 
+            variant="contained" 
+            color="success"
+            disabled={markAsPaidMutation.isPending || !actualPaymentDate}
+          >
+            {markAsPaidMutation.isPending ? 'Обработка...' : 'Подтвердить оплату'}
+          </Button>
+        </DialogActions>
+      </Dialog>
 
       {/* Диалог создания платежа */}
       <Dialog open={createOpen} onClose={() => setCreateOpen(false)} maxWidth="sm" fullWidth>

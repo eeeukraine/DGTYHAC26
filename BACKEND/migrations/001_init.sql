@@ -1,14 +1,6 @@
--- Сначала удаляем таблицы, которые ссылаются на другие (в обратном порядке зависимостей)
-DROP TABLE IF EXISTS distributions;
-DROP TABLE IF EXISTS invitations;
-DROP TABLE IF EXISTS shared_payments;
-DROP TABLE IF EXISTS family_members;
-DROP TABLE IF EXISTS families;
-DROP TABLE IF EXISTS payment_occurrences;
-DROP TABLE IF EXISTS recurring_payments;
-DROP TABLE IF EXISTS users;
+-- Создаем таблицы только если их еще не существует (данные сохраняются!)
 
-CREATE TABLE users (
+CREATE TABLE IF NOT EXISTS users (
     id INT AUTO_INCREMENT PRIMARY KEY,
     username VARCHAR(255) UNIQUE NOT NULL,
     password_hash VARCHAR(255) NOT NULL,
@@ -18,7 +10,7 @@ CREATE TABLE users (
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
 );
 
-CREATE TABLE recurring_payments (
+CREATE TABLE IF NOT EXISTS recurring_payments (
     id INT AUTO_INCREMENT PRIMARY KEY,
     user_id INT NOT NULL,
     name VARCHAR(255) NOT NULL,
@@ -28,12 +20,13 @@ CREATE TABLE recurring_payments (
     frequency_days INT NOT NULL DEFAULT 30,
     next_payment_date DATE NOT NULL,
     is_active BOOLEAN NOT NULL DEFAULT TRUE,
+    actual_payment_date DATE NULL,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
     FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
 );
 
-CREATE TABLE payment_occurrences (
+CREATE TABLE IF NOT EXISTS payment_occurrences (
     id INT AUTO_INCREMENT PRIMARY KEY,
     recurring_payment_id INT NOT NULL,
     period_start DATE NOT NULL,
@@ -46,7 +39,7 @@ CREATE TABLE payment_occurrences (
     FOREIGN KEY (recurring_payment_id) REFERENCES recurring_payments(id) ON DELETE CASCADE
 );
 
-CREATE TABLE families (
+CREATE TABLE IF NOT EXISTS families (
     id INT AUTO_INCREMENT PRIMARY KEY,
     name VARCHAR(255) NOT NULL,
     owner_id INT NOT NULL,
@@ -56,7 +49,7 @@ CREATE TABLE families (
     FOREIGN KEY (owner_id) REFERENCES users(id) ON DELETE CASCADE
 );
 
-CREATE TABLE family_members (
+CREATE TABLE IF NOT EXISTS family_members (
     id INT AUTO_INCREMENT PRIMARY KEY,
     family_id INT NOT NULL,
     user_id INT NOT NULL,
@@ -67,7 +60,7 @@ CREATE TABLE family_members (
     UNIQUE KEY unique_member (family_id, user_id)
 );
 
-CREATE TABLE shared_payments (
+CREATE TABLE IF NOT EXISTS shared_payments (
     id INT AUTO_INCREMENT PRIMARY KEY,
     family_id INT NOT NULL,
     name VARCHAR(255) NOT NULL,
@@ -81,7 +74,7 @@ CREATE TABLE shared_payments (
     FOREIGN KEY (created_by) REFERENCES users(id) ON DELETE CASCADE
 );
 
-CREATE TABLE distributions (
+CREATE TABLE IF NOT EXISTS distributions (
     id INT AUTO_INCREMENT PRIMARY KEY,
     shared_payment_id INT NOT NULL,
     user_id INT NOT NULL,
@@ -93,7 +86,7 @@ CREATE TABLE distributions (
     FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
 );
 
-CREATE TABLE invitations (
+CREATE TABLE IF NOT EXISTS invitations (
     id INT AUTO_INCREMENT PRIMARY KEY,
     family_id INT NOT NULL,
     invited_username VARCHAR(255) NOT NULL,
@@ -101,11 +94,3 @@ CREATE TABLE invitations (
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     FOREIGN KEY (family_id) REFERENCES families(id) ON DELETE CASCADE
 );
-
-CREATE INDEX idx_users_username ON users(username);
-CREATE INDEX idx_recurring_payments_user_id ON recurring_payments(user_id);
-CREATE INDEX idx_payment_occurrences_recurring_payment_id ON payment_occurrences(recurring_payment_id);
-CREATE INDEX idx_payment_occurrences_due_date ON payment_occurrences(due_date);
-CREATE INDEX idx_families_owner ON families(owner_id);
-CREATE INDEX idx_family_members_user ON family_members(user_id);
-CREATE INDEX idx_distributions_user ON distributions(user_id);

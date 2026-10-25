@@ -23,4 +23,5 @@ FrequencyDays   int       `json:"frequency_days"`
 NextPaymentDate time.Time `json:"next_payment_date"`
 IsActive        bool      `json:"is_active"`
 TargetUsername  string    `json:"target_username"` // Добавлено для отображения получателя на фронте
+PaymentType     string  `json:"payment_type"`
 }

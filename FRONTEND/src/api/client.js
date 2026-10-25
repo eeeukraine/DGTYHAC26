@@ -49,6 +49,13 @@ const apiClient = {
   disbandFamily: (id) => client.delete(`/families/${id}`).then(res => ({ data: res.data })),
   createSharedPayment: (familyId, data) => client.post(`/families/${familyId}/shared-payments`, data).then(res => ({ data: res.data })),
   distributePayment: (paymentId, data) => client.post(`/shared-payments/${paymentId}/distribute`, data).then(res => ({ data: res.data })),
+
+// Добавь эти методы в объект apiClient
+
+  getTelegramStatus: () => client.get('/telegram/status').then(res => ({ data: res.data })),
+
+  generateTelegramCode: () => client.post('/telegram/generate-code').then(res => ({ data: res.data })),
+
 }; // <-- ВОТ ЭТОЙ СКОБКИ НЕ ХВАТАЛО!
 
 export default apiClient;
